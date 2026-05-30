@@ -14,10 +14,14 @@ public class PlayerTelekinesis : MonoBehaviour
     public float pullSensitivity = 6.0f;  
     public float distanceScale = 0.25f;   
 
-    [Header("무게별 HP 소모 설정 (🩸)")]
-    public float hpDrainRate = 2f;               // ⏳ 들고 있을 때 초당 소모 배율 (초당 = 이 값 * 무게)
-    public float grabHpCostMultiplier = 0.5f;    // 🧲 집는 순간 즉시 소모 배율 (소모량 = 이 값 * 무게)
-    public float launchHpCostMultiplier = 1.0f;  // 🚀 발사하는 순간 즉시 소모 배율 (소모량 = 이 값 * 무게)
+    [Header("무게별 HP 제어 설정 (🩸)")]
+    public float hpDrainRate = 2f;               // ⏳ 들고 있을 때 초당 소모 배율
+    public float grabHpHealMultiplier = 1.0f;    // 💚 [변경] 집기 성공 시 HP 회복 배율 (회복량 = 이 값 * 무게)
+    public float launchHpCostMultiplier = 1.0f;  // 🚀 발사 시 소모 배율 (소모량 = 이 값 * 무게)
+
+    [Header("무게별 집기 시간 설정")]
+    public float baseGrabTime = 0.2f;            // ⏱️ 기본 최소 집기 시간 (초)
+    public float grabTimePerWeight = 0.05f;      // ⏱️ 무게 1당 추가되는 집기 시간 (초)
 
     [Header("무게 관련 탄성")]
     public float baseForceMultiplier = 12f; 
@@ -34,6 +38,12 @@ public class PlayerTelekinesis : MonoBehaviour
 
     private Vector2 dragStartMouseScreenPos; 
     private PolygonCollider2D sectorCollider; 
+
+    // ⏳ 집기 캐스팅(홀딩) 관련 내부 변수
+    private bool isGrabbingProgress = false; 
+    private float currentGrabTimer = 0f;
+    private float requiredGrabTime = 0f;
+    private TelekinesisTarget targetBeingGrabbed;
 
     void Awake()
     {
@@ -57,6 +67,7 @@ public class PlayerTelekinesis : MonoBehaviour
     {
         if (playerHealth != null && playerHealth.isDead)
         {
+            CancelCurrentGrab();
             DisableAllUI();
             if (grabbedTarget != null) ReleaseGrabbedObject();
             return;
@@ -64,6 +75,7 @@ public class PlayerTelekinesis : MonoBehaviour
 
         UpdateCrosshairPosition();
 
+        // 우클릭 유지 시 부채꼴 레이더 표시
         if (Mouse.current.rightButton.isPressed)
         {
             if (rangeLine != null)
@@ -75,6 +87,8 @@ public class PlayerTelekinesis : MonoBehaviour
         else
         {
             if (rangeLine != null) rangeLine.enabled = false;
+            // 💡 우클릭을 떼면 집고 있던 도중이었더라도 그랩 취소
+            if (isGrabbingProgress) CancelCurrentGrab();
         }
 
         HandleLeftClickInput();
@@ -131,11 +145,42 @@ public class PlayerTelekinesis : MonoBehaviour
 
     void HandleLeftClickInput()
     {
-        if (Mouse.current.leftButton.wasPressedThisFrame && grabbedTarget == null)
+        // 1. 아무것도 안 잡고 있고, 집는 중도 아닐 때 좌클릭을 '누르는 순간' 그랩 시작
+        if (Mouse.current.leftButton.wasPressedThisFrame && grabbedTarget == null && !isGrabbingProgress)
         {
-            TryGrabObjectInSector();
+            TryStartGrabInSector();
         }
-        else if (Mouse.current.leftButton.wasPressedThisFrame && grabbedTarget != null)
+
+        // 💡 [수정 포인트] 'isGrabbingProgress' 상태라면 마우스 홀딩을 더 확실하게 체크합니다.
+        if (isGrabbingProgress && targetBeingGrabbed != null)
+        {
+            // 플레이어와 물체의 거리가 너무 멀어지면 취소
+            if (Vector2.Distance(transform.position, targetBeingGrabbed.transform.position) > grabRange + 1f)
+            {
+                Debug.Log("물체와 거리가 너무 멀어져 그랩이 취소되었습니다.");
+                CancelCurrentGrab();
+            }
+            // 💡 마우스 좌클릭을 여전히 누르고 있다면 타이머 진행
+            else if (Mouse.current.leftButton.isPressed)
+            {
+                currentGrabTimer += Time.deltaTime;
+                
+                // 🎯 [성공] 게이지를 다 채우면 물체를 완벽하게 낚아챕니다!
+                if (currentGrabTimer >= requiredGrabTime)
+                {
+                    CompleteGrab(); 
+                }
+            }
+            // 마우스 좌클릭을 도중에 떼버렸다면 취소
+            else if (Mouse.current.leftButton.wasReleasedThisFrame || !Mouse.current.leftButton.isPressed)
+            {
+                Debug.Log("그랩 도중 마우스를 떼서 취소되었습니다.");
+                CancelCurrentGrab();
+            }
+        }
+
+        // 2. 물건을 '이미 완벽히 잡은 상태'에서 다시 좌클릭을 누르면 새총(드래그) 시작
+        if (Mouse.current.leftButton.wasPressedThisFrame && grabbedTarget != null && !isDragging)
         {
             dragStartMouseScreenPos = Mouse.current.position.ReadValue(); 
             isDragging = true;
@@ -147,6 +192,7 @@ public class PlayerTelekinesis : MonoBehaviour
             UpdateForwardAimLine();
         }
 
+        // 클릭을 떼는 순간 발사 시도
         if (Mouse.current.leftButton.wasReleasedThisFrame && isDragging && grabbedTarget != null)
         {
             LaunchObjectForward();
@@ -157,7 +203,7 @@ public class PlayerTelekinesis : MonoBehaviour
     {
         if (grabbedTarget != null)
         {
-            // ⏳ [지속 소모] 물체를 들고 있는 동안 시간에 비례해 실시간 피 깎임
+            // ⏳ [지속 소모] 들고 있는 동안 실시간 피 깎임
             if (playerHealth != null)
             {
                 float damageOverTime = hpDrainRate * grabbedTarget.weight * Time.deltaTime;
@@ -165,7 +211,7 @@ public class PlayerTelekinesis : MonoBehaviour
 
                 if (playerHealth.currentHp <= 0)
                 {
-                    ReleaseGrabbedObject();
+                    ReleaseGrabbedObject(); // 피가 0 이하가 되면 강제 드롭
                     return;
                 }
             }
@@ -175,7 +221,8 @@ public class PlayerTelekinesis : MonoBehaviour
         }
     }
 
-    void TryGrabObjectInSector()
+    // 부채꼴 안의 물체를 조준하여 집기 '시작'하는 함수
+    void TryStartGrabInSector()
     {
         if (sectorCollider == null) return;
 
@@ -192,27 +239,55 @@ public class PlayerTelekinesis : MonoBehaviour
             if (target == null) target = col.GetComponentInParent<TelekinesisTarget>();
             if (target == null) continue;
 
-            // 최소한 집을 때 필요한 즉시 소모 HP보다는 현재 피가 많아야 그랩 가능
-            float immediateGrabCost = target.weight * grabHpCostMultiplier;
-
-            if (!target.isCaught && !target.isFlying && playerHealth != null && playerHealth.currentHp > immediateGrabCost)
+            // 이미 날아가고 있거나 다른 곳에 잡힌 게 아니라면
+            if (!target.isCaught && !target.isFlying)
             {
-                grabbedTarget = target;
-                grabbedTarget.isCaught = true;
+                // ⏳ 확실하게 타겟을 지정하고 타이머 가동
+                targetBeingGrabbed = target;
+                requiredGrabTime = baseGrabTime + (target.weight * grabTimePerWeight);
+                currentGrabTimer = 0f;
+                isGrabbingProgress = true;
                 
-                // 🩸 [버그 수정 1] 집는 순간 즉시 HP 소모!
-                playerHealth.TakeDamage(immediateGrabCost);
-
-                Rigidbody2D targetRigid = grabbedTarget.GetComponent<Rigidbody2D>();
-                if (targetRigid != null) targetRigid.simulated = false;
-
-                Collider2D targetCollider = grabbedTarget.GetComponent<Collider2D>();
-                if (targetCollider != null) targetCollider.enabled = false;
-                
-                Debug.Log($"{col.gameObject.name} 그랩 성공! 즉시 HP {immediateGrabCost} 소모.");
-                break; 
+                Debug.Log($"🎯 {col.gameObject.name} 집기 시작! [필요 시간: {requiredGrabTime:F2}초]");
+                return; // 한 번에 하나의 물체만 타겟팅하도록 루프 탈출
             }
         }
+    }
+
+    // ⏳ 정해진 시간을 다 채워서 집기에 성공했을 때 호출되는 함수
+    void CompleteGrab()
+    {
+        if (targetBeingGrabbed == null) return;
+
+        grabbedTarget = targetBeingGrabbed;
+        grabbedTarget.isCaught = true;
+
+        // 💚 [보상 메커니즘] 무거운 물체일수록 피 회복을 많이 시켜줍니다!
+        if (playerHealth != null)
+        {
+            float healAmount = grabbedTarget.weight * grabHpHealMultiplier;
+            
+            // Health 스크립트에 Heal 기능이 있다면 사용하고, 없다면 아래처럼 강제 가산
+            playerHealth.currentHp = Mathf.Min(playerHealth.maxHp, playerHealth.currentHp + healAmount);
+            Debug.Log($"{grabbedTarget.gameObject.name} 그랩 성공! 무게가 무거워 HP {healAmount} 회복 완료!");
+        }
+
+        Rigidbody2D targetRigid = grabbedTarget.GetComponent<Rigidbody2D>();
+        if (targetRigid != null) targetRigid.simulated = false;
+
+        Collider2D targetCollider = grabbedTarget.GetComponent<Collider2D>();
+        if (targetCollider != null) targetCollider.enabled = false;
+
+        isGrabbingProgress = false;
+        targetBeingGrabbed = null;
+    }
+
+    // 집는 도중 취소되었을 때 초기화
+    void CancelCurrentGrab()
+    {
+        isGrabbingProgress = false;
+        targetBeingGrabbed = null;
+        currentGrabTimer = 0f;
     }
 
     void UpdateForwardAimLine()
@@ -239,10 +314,28 @@ public class PlayerTelekinesis : MonoBehaviour
         aimLine.SetPosition(1, transform.position + finalAimPath);
     }
 
+    // 🚀 발사 함수 (피 부족 시 떨어뜨리는 제약 조건 추가)
     void LaunchObjectForward()
     {
         isDragging = false;
         if (aimLine != null) aimLine.enabled = false;
+
+        if (grabbedTarget == null) return;
+
+        // 발사할 때 필요한 코스트 계산
+        float immediateLaunchCost = grabbedTarget.weight * launchHpCostMultiplier;
+
+        // 🛑 [제약 조건] 만약 현재 피가 발사 비용보다 작거나 같으면 발사 불가능! 그대로 바닥에 떨어뜨립니다.
+        if (playerHealth == null || playerHealth.currentHp <= immediateLaunchCost)
+        {
+            Debug.LogWarning("🚨 HP가 부족하여 물체를 발사하지 못하고 제자리에 떨어뜨렸습니다!");
+            ReleaseGrabbedObject(); // 발사하지 않고 그냥 툭 풀어줍니다.
+            return;
+        }
+
+        // 🩸 피가 충분하므로 정상 발사 및 HP 차감
+        playerHealth.TakeDamage(immediateLaunchCost);
+        Debug.Log($"{grabbedTarget.gameObject.name} 발사 성공! 즉시 HP {immediateLaunchCost} 소모.");
 
         Vector2 currentMouseScreenPos = Mouse.current.position.ReadValue();
         Vector2 screenDragVector = dragStartMouseScreenPos - currentMouseScreenPos;
@@ -256,14 +349,6 @@ public class PlayerTelekinesis : MonoBehaviour
         if (launchForce.magnitude > maxLaunchForce)
         {
             launchForce = launchForce.normalized * maxLaunchForce;
-        }
-
-        // 🩸 [버그 수정 2] 발사하는 순간 즉시 HP 추가 소모!
-        if (playerHealth != null)
-        {
-            float immediateLaunchCost = grabbedTarget.weight * launchHpCostMultiplier;
-            playerHealth.TakeDamage(immediateLaunchCost);
-            Debug.Log($"{grabbedTarget.gameObject.name} 발사 성공! 즉시 HP {immediateLaunchCost} 소모.");
         }
 
         Vector3 finalAimPath = (Vector3)(launchForce * distanceScale);
@@ -286,6 +371,9 @@ public class PlayerTelekinesis : MonoBehaviour
 
             Collider2D targetCollider = grabbedTarget.GetComponent<Collider2D>();
             if (targetCollider != null) targetCollider.enabled = true;
+            
+            // 💡 제자리에 부드럽게 멈추도록 리지드바디 속도 초기화 후 놔주기
+            targetRigid.linearVelocity = Vector2.zero;
             grabbedTarget = null;
         }
         isDragging = false;

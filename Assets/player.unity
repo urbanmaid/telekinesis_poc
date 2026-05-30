@@ -774,8 +774,12 @@ MonoBehaviour:
   maxLaunchForce: 25
   pullSensitivity: 5
   distanceScale: 0.2
-  baseForceMultiplier: 5
   hpDrainRate: 0
+  grabHpHealMultiplier: 1
+  launchHpCostMultiplier: 1
+  baseGrabTime: 0.2
+  grabTimePerWeight: 0.05
+  baseForceMultiplier: 5
   rangeLine: {fileID: 1374456148}
   aimLine: {fileID: 1720314162}
   crosshairObject: {fileID: 93390037}
@@ -1213,7 +1217,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b5efc5caa3992404fa041eb8f09547ea, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TelekinesisTarget
-  weight: 1
+  weight: 5
   damageMultiplier: 1.5
   isCaught: 0
   isFlying: 0
