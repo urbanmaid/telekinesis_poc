@@ -40,6 +40,7 @@ public class Player : MonoBehaviour
         }
 
         inputVec = context.ReadValue<Vector2>();
+        
     }
 
     private void FixedUpdate()
@@ -49,7 +50,7 @@ public class Player : MonoBehaviour
             rigid.linearVelocity = Vector2.zero;
             return;
         }
-
+        
         Vector2 moveVec = inputVec.normalized * speed * Time.fixedDeltaTime;
         rigid.MovePosition(rigid.position + moveVec);
     }

@@ -14,15 +14,21 @@ public class Bullet : MonoBehaviour
 
         if (player != null)
         {
-            Vector3 targetDirection = player.transform.position - transform.position;
+            Vector3 targetDirection =
+                player.transform.position - transform.position;
+
             moveDirection = targetDirection.normalized;
 
-            float angle = Mathf.Atan2(moveDirection.y, moveDirection.x) * Mathf.Rad2Deg;
-            transform.rotation = Quaternion.Euler(0, 0, angle - 90f);
+            float angle =
+                Mathf.Atan2(moveDirection.y, moveDirection.x)
+                * Mathf.Rad2Deg;
+
+            transform.rotation =
+                Quaternion.Euler(0, 0, angle - 90f);
         }
         else
         {
-            moveDirection = transform.right; 
+            moveDirection = transform.right;
         }
 
         Destroy(gameObject, lifeTime);
@@ -30,29 +36,37 @@ public class Bullet : MonoBehaviour
 
     void Update()
     {
-        transform.position += moveDirection * speed * Time.deltaTime;
+        transform.position +=
+            moveDirection * speed * Time.deltaTime;
     }
 
     private void OnTriggerEnter2D(Collider2D collision)
     {
-        // 1. 플레이어 혹은 생명체 피격 체크
-        Health targetHealth = collision.GetComponent<Health>();
-        if (targetHealth != null)
+        // 플레이어만 공격
+        if (collision.CompareTag("Player"))
         {
-            targetHealth.TakeDamage(damage);
-            Destroy(gameObject); 
+            Health playerHealth =
+                collision.GetComponent<Health>();
+
+            if (playerHealth != null)
+            {
+                playerHealth.TakeDamage(damage);
+            }
+
+            Destroy(gameObject);
             return;
         }
 
-        // 2. 🌟 [새로 추가] 염력 사물(오브젝트)에 부딪혔는지 체크
-        TelekinesisTarget targetObj = collision.GetComponent<TelekinesisTarget>();
+        // 염력 오브젝트 파괴
+        TelekinesisTarget targetObj =
+            collision.GetComponent<TelekinesisTarget>();
+
         if (targetObj != null)
         {
-            // 잡혀있는 상태이거나 가만히 있는 상태일 때 총알에 맞으면 사물 파괴
-            if (!targetObj.isFlying) 
+            if (!targetObj.isFlying)
             {
-                targetObj.DestroyObject(); // 사물 파괴 함수 호출
-                Destroy(gameObject);       // 총알 자신도 파괴
+                targetObj.DestroyObject();
+                Destroy(gameObject);
             }
         }
     }

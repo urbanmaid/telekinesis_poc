@@ -15,8 +15,8 @@ public class PlayerTelekinesis : MonoBehaviour
     public float distanceScale = 0.25f;   
 
     [Header("무게별 HP 제어 설정 (🩸)")]
-    public float hpDrainRate = 2f;               // ⏳ 들고 있을 때 초당 소모 배율
-    public float grabHpHealMultiplier = 1.0f;    // 💚 [변경] 집기 성공 시 HP 회복 배율 (회복량 = 이 값 * 무게)
+    public float hpHealRate = 0.5f;               // ⏳ 들고 있을 때 초당 소모 배율
+    public float grabHpCostMultiplier = 0.5f;    // 💚 [변경] 집기 성공 시 HP 회복 배율 (회복량 = 이 값 * 무게)
     public float launchHpCostMultiplier = 1.0f;  // 🚀 발사 시 소모 배율 (소모량 = 이 값 * 무게)
 
     [Header("무게별 집기 시간 설정")]
@@ -203,21 +203,29 @@ public class PlayerTelekinesis : MonoBehaviour
     {
         if (grabbedTarget != null)
         {
-            // ⏳ [지속 소모] 들고 있는 동안 실시간 피 깎임
+            // 들고 있는 동안 HP 회복
             if (playerHealth != null)
             {
-                float damageOverTime = hpDrainRate * grabbedTarget.weight * Time.deltaTime;
-                playerHealth.TakeDamage(damageOverTime);
+                float healAmount =
+                    hpHealRate *
+                    grabbedTarget.weight *
+                    Time.deltaTime;
 
-                if (playerHealth.currentHp <= 0)
-                {
-                    ReleaseGrabbedObject(); // 피가 0 이하가 되면 강제 드롭
-                    return;
-                }
+                playerHealth.currentHp =
+                    Mathf.Min(
+                        playerHealth.maxHp,
+                        playerHealth.currentHp + healAmount
+                    );
             }
 
-            Vector3 targetPos = transform.position; 
-            grabbedTarget.transform.position = Vector3.MoveTowards(grabbedTarget.transform.position, targetPos, pullSpeed * Time.deltaTime);
+            Vector3 targetPos = transform.position;
+
+            grabbedTarget.transform.position =
+                Vector3.MoveTowards(
+                    grabbedTarget.transform.position,
+                    targetPos,
+                    pullSpeed * Time.deltaTime
+                );
         }
     }
 
@@ -265,11 +273,13 @@ public class PlayerTelekinesis : MonoBehaviour
         // 💚 [보상 메커니즘] 무거운 물체일수록 피 회복을 많이 시켜줍니다!
         if (playerHealth != null)
         {
-            float healAmount = grabbedTarget.weight * grabHpHealMultiplier;
-            
-            // Health 스크립트에 Heal 기능이 있다면 사용하고, 없다면 아래처럼 강제 가산
-            playerHealth.currentHp = Mathf.Min(playerHealth.maxHp, playerHealth.currentHp + healAmount);
-            Debug.Log($"{grabbedTarget.gameObject.name} 그랩 성공! 무게가 무거워 HP {healAmount} 회복 완료!");
+            float grabCost =grabbedTarget.weight *grabHpCostMultiplier;
+
+            playerHealth.TakeDamage(grabCost);
+
+            Debug.Log(
+                $"{grabbedTarget.gameObject.name} 그랩 성공! HP {grabCost} 소모."
+            );
         }
 
         Rigidbody2D targetRigid = grabbedTarget.GetComponent<Rigidbody2D>();
