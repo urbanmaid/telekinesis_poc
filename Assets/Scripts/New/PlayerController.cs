@@ -165,7 +165,7 @@ public class PlayerController : MonoBehaviour
 
         Heal(other.attachedRigidbody.mass * inhaleHealPerMass);
 
-        Destroy(other.gameObject);
+        //Destroy(other.gameObject);
     }
 
     private void Heal(float amount)
