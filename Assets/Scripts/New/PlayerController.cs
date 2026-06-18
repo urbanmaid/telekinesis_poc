@@ -82,8 +82,8 @@ public class PlayerController : MonoBehaviour
             desiredVelocity - rb.linearVelocity;
 
         rb.AddForce(
-            velocityDelta * moveAcceleration,
-            ForceMode2D.Force);
+            velocityDelta * moveAcceleration * (rb.mass * Time.deltaTime),
+            ForceMode2D.Impulse);
     }
 
     private void Inhale()
