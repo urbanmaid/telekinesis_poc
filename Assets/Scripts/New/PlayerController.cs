@@ -111,10 +111,12 @@ public class PlayerController : MonoBehaviour
                 dir * inhaleForce,
                 ForceMode2D.Force);
 
+            /*
             float healAmount =
                 targetRb.mass * inhaleHealPerMass;
 
             Heal(healAmount);
+            */
         }
     }
 
